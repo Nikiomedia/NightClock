@@ -58,6 +58,10 @@ cargo build --release
 
 Die fertige Datei liegt dann unter `target\release\nightclock.exe`.
 
+## Lizenz
+
+[MIT](LICENSE)
+
 ---
 
 <a name="english"></a>
@@ -111,3 +115,7 @@ cargo build --release
 ```
 
 The executable is then located at `target\release\nightclock.exe`.
+
+## License
+
+[MIT](LICENSE)
