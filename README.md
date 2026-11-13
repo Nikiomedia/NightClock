@@ -5,6 +5,8 @@
 Eine elegante Nachtuhr mit Wecker für Windows, gedacht für den Zweitbildschirm im Vollbild.
 Geschrieben in Rust mit [egui](https://github.com/emilk/egui).
 
+**[⬇ NightClock.exe herunterladen](https://github.com/Nikiomedia/NightClock/releases/latest)** (Windows 10/11, keine Installation nötig)
+
 ![NightClock im Schrift-Stil](docs/clock.png)
 
 | 7-Segment im Hochformat | Analog | Wecker mit Lichtwecker |
@@ -70,6 +72,8 @@ Die fertige Datei liegt dann unter `target\release\nightclock.exe`.
 
 An elegant night clock with alarm for Windows, made to run fullscreen on a second monitor.
 Written in Rust with [egui](https://github.com/emilk/egui).
+
+**[⬇ Download NightClock.exe](https://github.com/Nikiomedia/NightClock/releases/latest)** (Windows 10/11, no installation required)
 
 ## Features
 
