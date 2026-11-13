@@ -11,6 +11,41 @@ pub enum ClockStyle {
     Analog,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum AmbientMode {
+    Off,
+    Plasma,
+    Lava,
+    Aurora,
+    Stars,
+    Fireflies,
+    Breath,
+}
+
+impl AmbientMode {
+    pub const ALL: [AmbientMode; 7] = [
+        AmbientMode::Off,
+        AmbientMode::Stars,
+        AmbientMode::Aurora,
+        AmbientMode::Fireflies,
+        AmbientMode::Lava,
+        AmbientMode::Plasma,
+        AmbientMode::Breath,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AmbientMode::Off => t("Aus", "Off"),
+            AmbientMode::Plasma => t("Plasma", "Plasma"),
+            AmbientMode::Lava => t("Lavalampe", "Lava lamp"),
+            AmbientMode::Aurora => t("Polarlicht", "Aurora"),
+            AmbientMode::Stars => t("Sternenhimmel", "Starry sky"),
+            AmbientMode::Fireflies => t("Glühwürmchen", "Fireflies"),
+            AmbientMode::Breath => t("Atem-Licht", "Breathing light"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Language {
     De,
@@ -96,6 +131,14 @@ pub struct Settings {
     pub glow: f32,
     pub scale: f32,
 
+    // ── Stimmung (bewegter Hintergrund) ─────────
+    pub ambient: AmbientMode,
+    pub ambient_intensity: f32,
+    pub ambient_speed: f32,
+    pub ambient_tint: bool,
+    /// Minuten ohne Bedienung bis zum Ausblenden (0 = nie)
+    pub ambient_timeout: u32,
+
     // ── Anzeige ─────────────────────────────────
     pub use_24h: bool,
     pub layout: LayoutMode,
@@ -121,6 +164,8 @@ pub struct Settings {
     pub burn_in_shift: bool,
     pub hide_cursor: bool,
     pub always_on_top: bool,
+    /// Sparmodus für schwache Grafik (weniger Bilder pro Sekunde, einfacheres Leuchten)
+    pub eco_mode: bool,
     pub window_rect: Option<[i32; 4]>,
     /// War das Fenster beim Beenden maximiert?
     pub window_maximized: bool,
@@ -158,6 +203,12 @@ impl Default for Settings {
             glow: 0.55,
             scale: 0.85,
 
+            ambient: AmbientMode::Off,
+            ambient_intensity: 0.6,
+            ambient_speed: 1.0,
+            ambient_tint: false,
+            ambient_timeout: 0,
+
             use_24h: true,
             layout: LayoutMode::Auto,
             leading_zero: true,
@@ -179,6 +230,7 @@ impl Default for Settings {
             burn_in_shift: true,
             hide_cursor: true,
             always_on_top: false,
+            eco_mode: false,
             window_rect: None,
             window_maximized: false,
             was_fullscreen: false,
@@ -214,7 +266,7 @@ impl Settings {
     pub fn load() -> Self {
         let mut s: Settings = std::fs::read_to_string(config_path())
             .ok()
-            .and_then(|txt| serde_json::from_str(&txt).ok())
+            .and_then(|txt| serde_json::from_str(txt.trim_start_matches('\u{feff}')).ok())
             .unwrap_or_default();
         s.sanitize();
         s
@@ -238,6 +290,9 @@ impl Settings {
         self.night_brightness = self.night_brightness.clamp(0.02, 1.0);
         self.glow = self.glow.clamp(0.0, 1.0);
         self.scale = self.scale.clamp(0.3, 1.0);
+        self.ambient_intensity = self.ambient_intensity.clamp(0.05, 1.0);
+        self.ambient_speed = self.ambient_speed.clamp(0.2, 2.5);
+        self.ambient_timeout = self.ambient_timeout.min(240);
         self.volume = self.volume.clamp(0.0, 1.0);
         self.fade_in_secs = self.fade_in_secs.clamp(0.0, 300.0);
         self.snooze_minutes = self.snooze_minutes.clamp(1, 60);

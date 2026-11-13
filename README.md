@@ -9,9 +9,27 @@ Geschrieben in Rust mit [egui](https://github.com/emilk/egui).
 
 ![NightClock im Schrift-Stil](docs/clock.png)
 
-| 7-Segment im Hochformat | Analog | Wecker mit Lichtwecker |
-|---|---|---|
-| ![Segment](docs/segment-portrait.png) | ![Analog](docs/analog.png) | ![Wecker](docs/alarm.png) |
+### Stimmungs-Hintergründe
+
+| Sternenhimmel | Polarlicht |
+|---|---|
+| ![Sternenhimmel](docs/ambient-stars.png) | ![Polarlicht](docs/ambient-aurora.png) |
+
+| Lavalampe | Glühwürmchen | 7-Segment, zweizeilig |
+|:---:|:---:|:---:|
+| ![Lavalampe](docs/ambient-lava.png) | ![Glühwürmchen](docs/ambient-fireflies.png) | ![7-Segment im Hochformat](docs/segment-portrait.png) |
+
+### Analog und Wecker
+
+| Analog | Wecker mit Lichtwecker |
+|---|---|
+| ![Analog](docs/analog.png) | ![Wecker mit Lichtwecker](docs/alarm.png) |
+
+### Einstellungen
+
+| Darstellung | Stimmung mit Live-Vorschau |
+|---|---|
+| ![Einstellungen](docs/settings.png) | ![Stimmung](docs/settings-ambience.png) |
 
 ## Funktionen
 
@@ -19,6 +37,9 @@ Geschrieben in Rust mit [egui](https://github.com/emilk/egui).
 - **Vektor-Ziffern:** gestochen scharf in jeder Größe, auch auf 4K
 - **Einzeilig oder zweizeilig:** Stunden und Minuten nebeneinander oder übereinander, ideal für Hochformat-Monitore
 - **Helligkeit, Farbe, Leuchten, Größe, Hintergrund** und Schriftstärke bei variablen Schriften
+- **Stimmungs-Hintergründe zum Einschlafen:** Sternenhimmel mit Sternschnuppen, Polarlicht,
+  Glühwürmchen, Lavalampe, Plasma und ein Atem-Licht zum Mitatmen, mit Helligkeit, Tempo,
+  Einfärben in der Uhrfarbe und automatischem Ausblenden
 - **Nachtmodus:** dimmt in einem Zeitfenster automatisch
 - **Wecker:** mehrere Weckzeiten mit Wochentagen, drei eingebaute Töne oder eigene Audiodatei,
   sanft lauter werden, Schlummern, automatisches Ausschalten
@@ -26,6 +47,7 @@ Geschrieben in Rust mit [egui](https://github.com/emilk/egui).
 - **Vollbild auf dem gewünschten Bildschirm**, Bildschirm wach halten, Einbrennschutz,
   Mauszeiger ausblenden, immer im Vordergrund
 - **Deutsch und Englisch**, umschaltbar oben im Einstellungsmenü
+- **Läuft auch auf schwacher Grafik:** sparsame Darstellung, optionaler Sparmodus
 
 ![Einstellungen](docs/settings.png)
 
@@ -75,12 +97,27 @@ Written in Rust with [egui](https://github.com/emilk/egui).
 
 **[⬇ Download NightClock.exe](https://github.com/Nikiomedia/NightClock/releases/latest)** (Windows 10/11, no installation required)
 
+| Starry sky | Aurora |
+|---|---|
+| ![Starry sky](docs/ambient-stars.png) | ![Aurora](docs/ambient-aurora.png) |
+
+| Lava lamp | Fireflies | 7-segment, two lines |
+|:---:|:---:|:---:|
+| ![Lava lamp](docs/ambient-lava.png) | ![Fireflies](docs/ambient-fireflies.png) | ![7-segment in portrait](docs/segment-portrait.png) |
+
+| Settings (English) | Alarm with wake-up light |
+|---|---|
+| ![Settings in English](docs/settings-en.png) | ![Alarm](docs/alarm.png) |
+
 ## Features
 
 - **Three styles:** text (any installed font), 7-segment (LED alarm clock) and analog
 - **Vector digits:** razor-sharp at any size, including 4K
 - **Single or two lines:** hours and minutes side by side or stacked, ideal for portrait monitors
 - **Brightness, color, glow, size, background**, and font weight for variable fonts
+- **Ambient backgrounds for falling asleep:** starry sky with shooting stars, aurora,
+  fireflies, lava lamp, plasma and a breathing light to breathe along with, with brightness,
+  speed, clock-color tint and automatic fade-out
 - **Night mode:** dims automatically during a time window
 - **Alarms:** several alarm times with weekdays, three built-in sounds or your own audio file,
   gentle fade-in, snooze, automatic shut-off
@@ -88,6 +125,7 @@ Written in Rust with [egui](https://github.com/emilk/egui).
 - **Fullscreen on the display of your choice**, keep screen awake, burn-in protection,
   hide mouse cursor, always on top
 - **German and English**, switchable at the top of the settings menu
+- **Runs on weak graphics too:** lightweight rendering, optional eco mode
 
 ## Usage
 

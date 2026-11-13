@@ -61,6 +61,8 @@ pub struct Palette {
     pub base: [u8; 3],
     pub level: f32,
     pub glow: f32,
+    /// Sparmodus: weniger Kopien für das Leuchten (schwache Grafik)
+    pub eco: bool,
 }
 
 impl Palette {
@@ -243,7 +245,7 @@ impl Extras {
             y += self.line_gap;
             let th = self.line_th;
             let track = Rect::from_min_max(pos2(left, y), pos2(right, y + th));
-            p.rect_filled(track, th * 0.5, pal.col(0.09));
+            p.rect_filled(track, th * 0.5, pal.add(0.09));
             let prog = ((t.s as f32 + t.frac) / 60.0).clamp(0.0, 1.0);
             let xe = left + (right - left) * prog;
             p.rect_filled(
@@ -305,9 +307,10 @@ fn separator_dots(p: &Painter, pal: &Palette, centers: [Pos2; 2], r: f32, level:
             });
         }
         if ghost {
-            p.circle_filled(c, r, pal.col(0.06));
+            p.circle_filled(c, r, pal.add(0.06));
         }
-        p.circle_filled(c, r, pal.col(level));
+        // durchscheinend statt dunkel, damit ein Hintergrund sichtbar bleibt
+        p.circle_filled(c, r, pal.col(1.0).gamma_multiply(level.clamp(0.0, 1.0)));
     }
 }
 
@@ -364,7 +367,7 @@ fn draw_glyph_items(p: &Painter, vf: &mut VectorFont, pal: &Palette, items: &[Gl
         for it in items {
             if let Some(g) = vf.glyph(it.c) {
                 let k = pal.glow * it.glow;
-                g.draw_glow(p, it.origin, it.size, |w| pal.add(k * w));
+                g.draw_glow(p, it.origin, it.size, pal.eco, |w| pal.add(k * w));
             }
         }
     }
@@ -490,7 +493,7 @@ fn draw_text_style(
         }
         let l = cx - width * 0.5;
         let x = glyph_row(vf, &m, &mut items, &hour_s, l, top, size, main, 1.0);
-        let x = glyph_row(vf, &m, &mut items, ":", x, top, size, pal.col(cl), 0.7);
+        let x = glyph_row(vf, &m, &mut items, ":", x, top, size, pal.col(1.0).gamma_multiply(cl), 0.7);
         let x = glyph_row(vf, &m, &mut items, &min_s, x, top, size, main, 1.0);
         left = l;
         right = x;
@@ -737,7 +740,7 @@ fn draw_segment_style(p: &Painter, rect: Rect, t: &ClockTime, s: &Settings, pal:
 
     // 1) inaktive Segmente
     if s.ghost_segments {
-        let ghost = pal.col(0.06);
+        let ghost = pal.add(0.06);
         for d in &digits {
             for (i, poly) in d.polys.iter().enumerate() {
                 if d.mask & (1 << i) == 0 {
@@ -748,13 +751,17 @@ fn draw_segment_style(p: &Painter, rect: Rect, t: &ClockTime, s: &Settings, pal:
     }
     // 2) Leuchten: leicht versetzte, additive Kopien der aktiven Segmente
     if pal.glow > 0.01 {
-        const RINGS: [(f32, f32); 3] = [(0.22, 0.5), (0.5, 0.3), (0.9, 0.2)];
-        const N: usize = 10;
+        let (rings, n): (&[(f32, f32)], usize) = if pal.eco {
+            (&[(0.3, 0.6), (0.8, 0.4)], 6)
+        } else {
+            (&[(0.22, 0.5), (0.5, 0.3), (0.9, 0.2)], 8)
+        };
+        let per = 10.0 / n as f32;
         for d in &digits {
-            for (ri, &(r, w)) in RINGS.iter().enumerate() {
-                let col = pal.add(pal.glow * d.level * w * 0.15);
-                for k in 0..N {
-                    let a = (k as f32 + 0.5 * ri as f32) / N as f32 * TAU;
+            for (ri, &(r, w)) in rings.iter().enumerate() {
+                let col = pal.add(pal.glow * d.level * w * 0.15 * per);
+                for k in 0..n {
+                    let a = (k as f32 + 0.5 * ri as f32) / n as f32 * TAU;
                     let off = vec2(a.cos(), a.sin()) * (r * d.th).max(1.0);
                     for (i, poly) in d.polys.iter().enumerate() {
                         if d.mask & (1 << i) != 0 {

@@ -5,7 +5,8 @@ use crate::audio::AlarmPlayer;
 use crate::clock::{self, falloff, ClockTime, Palette};
 use crate::fonts;
 use crate::platform::{self, MonitorInfo};
-use crate::settings::{ClockStyle, SecondsMode, Settings};
+use crate::ambient::AmbientParams;
+use crate::settings::{AmbientMode, ClockStyle, SecondsMode, Settings};
 use crate::i18n::t;
 use crate::ui;
 use crate::vfont::VectorFont;
@@ -35,6 +36,7 @@ pub struct NightClockApp {
     loaded_font: Option<(String, u32)>,
     loaded_vfont: (String, u32, u32),
     pub vfont: VectorFont,
+    pub ambient: crate::ambient::Ambient,
     pub font_list: fonts::SharedFontList,
     font_scan_started: bool,
     pub font_search: String,
@@ -71,6 +73,13 @@ pub struct NightClockApp {
 
 impl NightClockApp {
     pub fn new(cc: &eframe::CreationContext<'_>, mut s: Settings, force_fullscreen: bool) -> Self {
+        // Testbilder (nur Debug): gespeicherten Fenster-/Vollbild-Zustand ignorieren
+        #[cfg(debug_assertions)]
+        if std::env::var_os("NIGHTCLOCK_SHOT").is_some() {
+            s.was_fullscreen = false;
+            s.start_fullscreen = false;
+            s.window_rect = None;
+        }
         // Schrift prüfen / Standard wählen
         let font_ok = !s.font_path.is_empty() && PathBuf::from(&s.font_path).exists();
         if !font_ok {
@@ -96,6 +105,7 @@ impl NightClockApp {
             loaded_font: Some((s.font_path.clone(), s.font_index)),
             loaded_vfont: (s.font_path.clone(), s.font_index, s.font_weight.to_bits()),
             vfont,
+            ambient: crate::ambient::Ambient::new(),
             saved: s.clone(),
             s,
             last_save_check: Instant::now(),
@@ -605,6 +615,25 @@ impl NightClockApp {
                     "settings" => self.settings_open = true,
                     "fullscreen" => self.enter_fullscreen(ctx),
                     "en" => self.s.language = crate::settings::Language::En,
+                    "tint" => self.s.ambient_tint = true,
+                    "eco" => self.s.eco_mode = true,
+                    "stacked" => self.s.layout = crate::settings::LayoutMode::Stacked,
+                    "single" => self.s.layout = crate::settings::LayoutMode::Single,
+                    "clean" => self.last_activity = Instant::now() - Duration::from_secs(30),
+                    "ambient" => {
+                        self.s.ambient = match v {
+                            "plasma" => AmbientMode::Plasma,
+                            "lava" => AmbientMode::Lava,
+                            "aurora" => AmbientMode::Aurora,
+                            "stars" => AmbientMode::Stars,
+                            "fireflies" => AmbientMode::Fireflies,
+                            "breath" => AmbientMode::Breath,
+                            _ => AmbientMode::Off,
+                        };
+                        self.ambient.time = 37.0;
+                    }
+                    "ambient_k" => self.s.ambient_intensity = v.parse().unwrap_or(0.6),
+                    "atime" => self.ambient.time = v.parse().unwrap_or(0.0),
                     "de" => self.s.language = crate::settings::Language::De,
                     "text" => self.s.style = ClockStyle::Text,
                     "segment" => self.s.style = ClockStyle::Segment,
@@ -651,7 +680,7 @@ impl NightClockApp {
                 }
             }
         }
-        if self.settings_open || self.ringing.is_some() || ds.has("hover") {
+        if (self.settings_open || self.ringing.is_some() || ds.has("hover")) && !ds.has("clean") {
             self.last_activity = Instant::now();
         }
         if self.frame_count == 45 && !ds.requested {
@@ -783,6 +812,7 @@ impl NightClockApp {
             base: self.s.color,
             level,
             glow: self.s.glow,
+            eco: self.s.eco_mode,
         };
         let painter = ui.painter();
 
@@ -794,6 +824,19 @@ impl NightClockApp {
             (self.s.background[2] as f32 * bk) as u8,
         );
         painter.rect_filled(rect, 0.0, bg);
+
+        // Stimmungs-Hintergrund
+        let fade = self.ambient_fade();
+        if self.s.ambient != AmbientMode::Off && fade > 0.0 {
+            let params = AmbientParams {
+                mode: self.s.ambient,
+                k: self.s.ambient_intensity * level.powf(0.8) * fade,
+                tint: self.s.ambient_tint.then_some(self.s.color),
+                bg: [bg.r(), bg.g(), bg.b()],
+                eco: self.s.eco_mode,
+            };
+            self.ambient.paint(ctx, painter, rect, params, "main", 200.0, 0);
+        }
 
         // Lichtwecker
         let sun = self.sunrise_progress(now);
@@ -826,8 +869,20 @@ impl NightClockApp {
         self.draw_status_line(painter, rect, shift, &pal, now);
     }
 
+    /// 1 = sichtbar; blendet nach der eingestellten Zeit ohne Bedienung aus.
+    pub fn ambient_fade(&self) -> f32 {
+        if self.s.ambient_timeout == 0 || self.settings_open || self.ringing.is_some() {
+            return 1.0;
+        }
+        let idle = self.last_activity.elapsed().as_secs_f32();
+        let limit = self.s.ambient_timeout as f32 * 60.0;
+        (1.0 - (idle - limit) / 60.0).clamp(0.0, 1.0)
+    }
+
     fn needs_animation(&self, now: DateTime<Local>) -> bool {
-        self.s.blink_colon
+        (self.s.ambient != AmbientMode::Off && self.ambient_fade() > 0.0)
+            || self.settings_open
+            || self.s.blink_colon
             || self.s.seconds == SecondsMode::Line
             || (self.s.style == ClockStyle::Analog && self.s.seconds != SecondsMode::Off)
             || self.ringing.is_some()
@@ -870,6 +925,7 @@ impl eframe::App for NightClockApp {
         self.apply_system_state(ctx);
         self.check_alarms(now);
         self.handle_input(ctx);
+        self.ambient.advance(self.s.ambient_speed);
         #[cfg(debug_assertions)]
         self.devshot_tick(ctx);
 
@@ -900,7 +956,9 @@ impl eframe::App for NightClockApp {
         self.autosave();
 
         if self.needs_animation(now) {
-            ctx.request_repaint_after(Duration::from_millis(33));
+            // langsame Bewegungen: 20 Bilder/s genügen, im Sparmodus 10
+            let ms = if self.s.eco_mode { 100 } else { 50 };
+            ctx.request_repaint_after(Duration::from_millis(ms));
         } else {
             let ms = 1000 - now.timestamp_subsec_millis().min(999) as u64;
             ctx.request_repaint_after(Duration::from_millis(ms + 5));

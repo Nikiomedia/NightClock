@@ -245,16 +245,22 @@ impl GlyphGeom {
     }
 
     /// Weicher Lichtschein: viele leicht versetzte, additive Kopien.
-    pub fn draw_glow(&self, p: &Painter, origin: Pos2, size: f32, glow: impl Fn(f32) -> Color32) {
-        const RINGS: [(f32, f32); 4] = [(0.005, 0.30), (0.013, 0.35), (0.030, 0.25), (0.058, 0.16)];
-        const N: usize = 12;
-        for (ri, &(r, w)) in RINGS.iter().enumerate() {
-            let col = glow(w * 0.14);
+    /// `eco`: Sparmodus mit noch weniger Kopien (schwache Grafik).
+    pub fn draw_glow(&self, p: &Painter, origin: Pos2, size: f32, eco: bool, glow: impl Fn(f32) -> Color32) {
+        // Ringe (Abstand, Gewicht) × Kopien pro Ring; Gesamthelligkeit bleibt gleich
+        let (rings, n): (&[(f32, f32)], usize) = if eco {
+            (&[(0.007, 0.6), (0.020, 0.4)], 6)
+        } else {
+            (&[(0.006, 0.40), (0.018, 0.35), (0.042, 0.25)], 8)
+        };
+        let per = 12.0 / n as f32 * 1.06;
+        for (ri, &(r, w)) in rings.iter().enumerate() {
+            let col = glow(w * 0.14 * per);
             if col.r() == 0 && col.g() == 0 && col.b() == 0 {
                 continue;
             }
-            for i in 0..N {
-                let a = (i as f32 + 0.5 * ri as f32) / N as f32 * std::f32::consts::TAU;
+            for i in 0..n {
+                let a = (i as f32 + 0.5 * ri as f32) / n as f32 * std::f32::consts::TAU;
                 let off = Vec2::new(a.cos(), a.sin()) * (r * size).max(1.0);
                 self.draw_fill(p, origin + off, size, col);
             }

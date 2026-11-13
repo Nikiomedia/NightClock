@@ -2,6 +2,7 @@
 //! NightClock – eine elegante Nachtuhr mit Wecker für den Zweitbildschirm.
 
 mod alarm;
+mod ambient;
 mod app;
 mod audio;
 mod clock;

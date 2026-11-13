@@ -3,7 +3,8 @@
 use crate::app::NightClockApp;
 use crate::fonts::ui_bold_family;
 use crate::i18n::t;
-use crate::settings::{Alarm, AlarmSound, ClockStyle, Language, LayoutMode, SecondsMode};
+use crate::ambient::AmbientParams;
+use crate::settings::{Alarm, AlarmSound, AmbientMode, ClockStyle, Language, LayoutMode, SecondsMode};
 use egui::{
     pos2, vec2, Align, Align2, Area, Button, Color32, ComboBox, Context, CornerRadius, DragValue,
     FontFamily, FontId, Frame, Id, Layout, Margin, Order, Painter, PopupCloseBehavior, Pos2, Rect,
@@ -604,6 +605,7 @@ pub fn settings_panel(app: &mut NightClockApp, ctx: &Context) {
                     sa.show(ui, |ui| {
                             ui.set_width(ui.available_width() - 8.0);
                             section_look(app, ui, acc);
+                            section_ambient(app, ui, ctx, acc);
                             section_display(app, ui, acc);
                             section_alarm(app, ui, acc);
                             section_night(app, ui, acc);
@@ -695,6 +697,101 @@ fn section_look(app: &mut NightClockApp, ui: &mut Ui, acc: Color32) {
                 ui.color_edit_button_srgb(&mut app.s.background);
             });
         });
+    });
+}
+
+fn ambient_slot(m: AmbientMode) -> &'static str {
+    match m {
+        AmbientMode::Off => "prev-off",
+        AmbientMode::Plasma => "prev-plasma",
+        AmbientMode::Lava => "prev-lava",
+        AmbientMode::Aurora => "prev-aurora",
+        AmbientMode::Stars => "prev-stars",
+        AmbientMode::Fireflies => "prev-fireflies",
+        AmbientMode::Breath => "prev-breath",
+    }
+}
+
+fn section_ambient(app: &mut NightClockApp, ui: &mut Ui, ctx: &Context, acc: Color32) {
+    let color = app.s.color;
+    card(ui, t("Stimmung", "Ambience"), acc, |ui| {
+        weak(ui, t("Bewegter Hintergrund zum Einschlafen", "Moving background for falling asleep"));
+        let gap = 8.0;
+        let w = ((ui.available_width() - gap) / 2.0).floor();
+        let tile_h = 56.0;
+        for row in AmbientMode::ALL.chunks(2) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for &m in row {
+                    let (rect, resp) = ui.allocate_exact_size(vec2(w, tile_h + 22.0), Sense::click());
+                    let prev = Rect::from_min_size(rect.min, vec2(w, tile_h));
+                    let hov = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), 0.12);
+                    ui.painter().rect_filled(prev, 9.0, Color32::from_rgb(8, 9, 12));
+                    if m == AmbientMode::Off {
+                        ui.painter().text(
+                            prev.center(),
+                            Align2::CENTER_CENTER,
+                            "—",
+                            FontId::proportional(18.0),
+                            Color32::from_gray(90),
+                        );
+                    } else {
+                        let params = AmbientParams {
+                            mode: m,
+                            k: 0.95,
+                            tint: app.s.ambient_tint.then_some(color),
+                            bg: [0, 0, 0],
+                            eco: app.s.eco_mode,
+                        };
+                        app.ambient.paint(ctx, ui.painter(), prev, params, ambient_slot(m), 72.0, 9);
+                    }
+                    let selected = app.s.ambient == m;
+                    let stroke = if selected {
+                        Stroke::new(2.0_f32, acc)
+                    } else {
+                        Stroke::new(1.0_f32, Color32::from_white_alpha((14.0 + 30.0 * hov) as u8))
+                    };
+                    ui.painter().rect_stroke(prev, 9.0, stroke, egui::StrokeKind::Inside);
+                    ui.painter().text(
+                        pos2(prev.left() + 2.0, prev.bottom() + 11.0),
+                        Align2::LEFT_CENTER,
+                        m.label(),
+                        FontId::proportional(13.0),
+                        if selected { acc } else { Color32::from_gray((170.0 + 50.0 * hov) as u8) },
+                    );
+                    if resp.clicked() {
+                        app.s.ambient = m;
+                    }
+                }
+            });
+        }
+        if app.s.ambient != AmbientMode::Off {
+            ui.add_space(2.0);
+            slider_row(ui, t("Helligkeit", "Brightness"), &mut app.s.ambient_intensity, 0.05..=1.0, pct);
+            slider_row(ui, t("Tempo", "Speed"), &mut app.s.ambient_speed, 0.2..=2.5, |v| format!("{v:.1}×"));
+            toggle_row(ui, t("In Uhrfarbe einfärben", "Tint with clock color"), &mut app.s.ambient_tint, acc);
+            slider_row(ui, t("Ausblenden nach", "Fade out after"), &mut app.s.ambient_timeout, 0..=180, |v| {
+                if v == 0 {
+                    t("nie", "never").to_string()
+                } else {
+                    format!("{v} min")
+                }
+            })
+            .on_hover_text(t(
+                "Blendet den Hintergrund aus, wenn so lange nichts bedient wurde (spart Strom)",
+                "Fades the background out after this long without input (saves power)",
+            ));
+            if app.s.ambient == AmbientMode::Breath {
+                ui.label(
+                    RichText::new(t(
+                        "Atme mit dem Licht: 4 Sekunden ein, 6 Sekunden aus",
+                        "Breathe with the light: 4 seconds in, 6 seconds out",
+                    ))
+                    .size(12.5)
+                    .color(Color32::from_gray(140)),
+                );
+            }
+        }
     });
 }
 
@@ -1021,6 +1118,11 @@ fn section_screen(app: &mut NightClockApp, ui: &mut Ui, ctx: &Context, acc: Colo
             .on_hover_text(t("Schützt OLED-Bildschirme vor eingebrannten Ziffern", "Protects OLED screens from burned-in digits"));
         toggle_row(ui, t("Mauszeiger im Vollbild ausblenden", "Hide mouse cursor in fullscreen"), &mut app.s.hide_cursor, acc);
         toggle_row(ui, t("Immer im Vordergrund", "Always on top"), &mut app.s.always_on_top, acc);
+        toggle_row(ui, t("Sparmodus für schwache Grafik", "Eco mode for weak graphics"), &mut app.s.eco_mode, acc)
+            .on_hover_text(t(
+                "Weniger Bilder pro Sekunde und ein einfacheres Leuchten, z. B. für Laptops oder Onboard-Grafik",
+                "Fewer frames per second and a simpler glow, e.g. for laptops or integrated graphics",
+            ));
     });
 }
 
