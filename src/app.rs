@@ -22,7 +22,9 @@ pub struct Ringing {
 }
 
 enum Pending {
-    RestoreRect([i32; 4]),
+    /// Fensterrechteck setzen; mehrere Durchgänge, weil Windows die Größe beim
+    /// Wechsel auf einen Monitor mit anderer Skalierung (DPI) mitskaliert.
+    RestoreRect([i32; 4], u8),
     EnterFullscreen,
 }
 
@@ -43,6 +45,9 @@ pub struct NightClockApp {
     frame_count: u64,
     force_fullscreen: bool,
     windowed_rect: Option<[i32; 4]>,
+    windowed_maximized: bool,
+    /// Nach dem Wiederherstellen der Position maximieren
+    restore_maximized: bool,
     pending: Option<(Pending, u32)>,
     pending_tries: u32,
     pub toast: Option<(String, Instant)>,
@@ -104,6 +109,8 @@ impl NightClockApp {
             frame_count: 0,
             force_fullscreen,
             windowed_rect: None,
+            windowed_maximized: false,
+            restore_maximized: false,
             pending: None,
             pending_tries: 0,
             toast: None,
@@ -164,13 +171,17 @@ impl NightClockApp {
         let target = self.target_monitor();
         if let Some(hwnd) = self.hwnd {
             if remember && !self.is_fullscreen {
-                if let Some(r) = platform::window_rect(hwnd) {
+                if let Some((r, maxed)) = platform::window_state(hwnd) {
                     self.windowed_rect = Some(r);
+                    self.windowed_maximized = maxed;
                 }
             }
             if let Some(m) = &target {
                 platform::move_to_monitor(hwnd, m);
             }
+        }
+        if let Some(m) = &target {
+            self.s.monitor_device = m.device.clone();
         }
         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
         let name = target
@@ -184,7 +195,8 @@ impl NightClockApp {
     pub fn exit_fullscreen(&mut self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
         if let Some(r) = self.windowed_rect {
-            self.pending = Some((Pending::RestoreRect(r), 3));
+            self.restore_maximized = self.windowed_maximized;
+            self.pending = Some((Pending::RestoreRect(r, 2), 3));
         }
     }
 
@@ -222,32 +234,73 @@ impl NightClockApp {
             return;
         }
         // warten, bis das Vollbild wirklich verlassen wurde (max. ~2 s)
-        if self.is_fullscreen && self.pending_tries < 60 {
-            self.pending_tries += 1;
-            self.pending = Some((action, 1));
+        if self.is_fullscreen {
+            if self.pending_tries < 60 {
+                self.pending_tries += 1;
+                self.pending = Some((action, 1));
+            } else {
+                // immer noch Vollbild: Fensterposition nicht anfassen
+                self.pending_tries = 0;
+            }
             return;
         }
         self.pending_tries = 0;
         match action {
-            Pending::RestoreRect(r) => {
+            Pending::RestoreRect(r, passes) => {
                 if let Some(h) = self.hwnd {
                     if platform::rect_visible(r) {
                         platform::set_window_rect(h, r);
+                        if passes > 1 {
+                            self.pending = Some((Pending::RestoreRect(r, passes - 1), 4));
+                            return;
+                        }
+                    }
+                    if self.restore_maximized {
+                        platform::maximize(h);
                     }
                 }
+                self.restore_maximized = false;
             }
             Pending::EnterFullscreen => self.enter_fullscreen_inner(ctx, false),
         }
     }
 
+    /// Letzte Fensterposition, -größe und letzten Zustand wiederherstellen.
     fn on_first_frame(&mut self, ctx: &egui::Context) {
-        if let (Some(h), Some(r)) = (self.hwnd, self.s.window_rect) {
-            if platform::rect_visible(r) {
-                platform::set_window_rect(h, r);
+        let go_fullscreen =
+            self.force_fullscreen || self.s.start_fullscreen || self.s.was_fullscreen;
+        let rect = self.s.window_rect.filter(|r| platform::rect_visible(*r));
+        if let (Some(h), Some(r)) = (self.hwnd, rect) {
+            // 1. Durchgang verschiebt auf den richtigen Monitor (Windows skaliert dabei
+            //    evtl. die Größe), der 2. setzt die exakte Größe.
+            platform::set_window_rect(h, r);
+            self.windowed_rect = Some(r);
+            self.windowed_maximized = self.s.window_maximized;
+            if !go_fullscreen {
+                self.restore_maximized = self.s.window_maximized;
+                self.pending = Some((Pending::RestoreRect(r, 1), 4));
             }
         }
-        if self.force_fullscreen || self.s.start_fullscreen {
-            self.enter_fullscreen(ctx);
+        if go_fullscreen {
+            self.enter_fullscreen_inner(ctx, rect.is_none());
+        }
+    }
+
+    /// Aktuellen Fensterzustand in die Einstellungen übernehmen.
+    fn capture_window_state(&mut self) {
+        // nicht während Übergängen oder direkt nach dem Start
+        if self.pending.is_some() || self.start.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.s.was_fullscreen = self.is_fullscreen;
+        if self.is_fullscreen {
+            return;
+        }
+        if let Some(h) = self.hwnd {
+            if let Some((r, maxed)) = platform::window_state(h) {
+                self.s.window_rect = Some(r);
+                self.s.window_maximized = maxed;
+            }
         }
     }
 
@@ -627,13 +680,7 @@ impl NightClockApp {
             return;
         }
         self.last_save_check = Instant::now();
-        if !self.is_fullscreen && self.pending.is_none() {
-            if let Some(h) = self.hwnd {
-                if let Some(r) = platform::window_rect(h) {
-                    self.s.window_rect = Some(r);
-                }
-            }
-        }
+        self.capture_window_state();
         if self.s != self.saved {
             self.s.save();
             self.saved = self.s.clone();
@@ -846,6 +893,7 @@ impl eframe::App for NightClockApp {
         }
 
         if ctx.input(|i| i.viewport().close_requested()) && !self.no_save {
+            self.capture_window_state();
             self.s.save();
             self.saved = self.s.clone();
         }

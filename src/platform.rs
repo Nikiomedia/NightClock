@@ -48,17 +48,17 @@ impl MonitorInfo {
 #[cfg(windows)]
 mod imp {
     use super::MonitorInfo;
-    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
-        EnumDisplayMonitors, GetMonitorInfoW, MonitorFromRect, HDC, HMONITOR, MONITORINFO,
-        MONITORINFOEXW, MONITOR_DEFAULTTONULL,
+        EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, MonitorFromRect, HDC, HMONITOR,
+        MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTOPRIMARY,
     };
     use windows_sys::Win32::System::Power::{
         SetThreadExecutionState, ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowRect, IsIconic, IsZoomed, SetWindowPos, ShowWindow, SWP_NOACTIVATE,
-        SWP_NOZORDER, SW_RESTORE,
+        GetWindowPlacement, GetWindowRect, IsIconic, IsZoomed, SetWindowPos, ShowWindow,
+        SWP_NOACTIVATE, SWP_NOZORDER, SW_MAXIMIZE, SW_RESTORE, WINDOWPLACEMENT,
     };
 
     const MONITORINFOF_PRIMARY: u32 = 1;
@@ -117,6 +117,51 @@ mod imp {
             } else {
                 None
             }
+        }
+    }
+
+    /// Verschiebung zwischen Arbeitsbereichs- und Bildschirmkoordinaten
+    /// (nur relevant, wenn die Taskleiste oben oder links liegt).
+    fn workspace_offset() -> (i32, i32) {
+        unsafe {
+            let m = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+            let mut info: MONITORINFO = std::mem::zeroed();
+            info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(m, &mut info) != 0 {
+                (
+                    info.rcWork.left - info.rcMonitor.left,
+                    info.rcWork.top - info.rcMonitor.top,
+                )
+            } else {
+                (0, 0)
+            }
+        }
+    }
+
+    /// Normale Fensterposition (auch wenn maximiert) und ob maximiert.
+    /// `None`, wenn das Fenster minimiert ist.
+    pub fn window_state(hwnd: isize) -> Option<([i32; 4], bool)> {
+        unsafe {
+            if IsIconic(h(hwnd)) != 0 {
+                return None;
+            }
+            if IsZoomed(h(hwnd)) == 0 {
+                return window_rect(hwnd).map(|r| (r, false));
+            }
+            let mut wp: WINDOWPLACEMENT = std::mem::zeroed();
+            wp.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+            if GetWindowPlacement(h(hwnd), &mut wp) == 0 {
+                return None;
+            }
+            let (dx, dy) = workspace_offset();
+            let r = wp.rcNormalPosition;
+            Some(([r.left + dx, r.top + dy, r.right + dx, r.bottom + dy], true))
+        }
+    }
+
+    pub fn maximize(hwnd: isize) {
+        unsafe {
+            ShowWindow(h(hwnd), SW_MAXIMIZE);
         }
     }
 
@@ -182,6 +227,10 @@ mod imp {
         None
     }
     pub fn set_window_rect(_hwnd: isize, _r: [i32; 4]) {}
+    pub fn window_state(_hwnd: isize) -> Option<([i32; 4], bool)> {
+        None
+    }
+    pub fn maximize(_hwnd: isize) {}
     pub fn rect_visible(_r: [i32; 4]) -> bool {
         false
     }

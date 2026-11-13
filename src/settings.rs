@@ -122,6 +122,10 @@ pub struct Settings {
     pub hide_cursor: bool,
     pub always_on_top: bool,
     pub window_rect: Option<[i32; 4]>,
+    /// War das Fenster beim Beenden maximiert?
+    pub window_maximized: bool,
+    /// War beim Beenden das Vollbild aktiv?
+    pub was_fullscreen: bool,
 
     // ── Wecker ──────────────────────────────────
     pub alarms: Vec<Alarm>,
@@ -176,6 +180,8 @@ impl Default for Settings {
             hide_cursor: true,
             always_on_top: false,
             window_rect: None,
+            window_maximized: false,
+            was_fullscreen: false,
 
             alarms: vec![Alarm {
                 enabled: false,
