@@ -94,7 +94,7 @@ mod tests {
     }
 
     fn alarm(h: u32, m: u32, days: [bool; 7]) -> Alarm {
-        Alarm { enabled: true, hour: h, minute: m, days }
+        Alarm { enabled: true, hour: h, minute: m, days, ..Alarm::default() }
     }
 
     #[test]

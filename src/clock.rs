@@ -1,6 +1,6 @@
 //! Zeichnet die Uhr: Schrift-, Segment- und Analog-Stil, inkl. Leuchteffekt.
 
-use crate::fonts::clock_family;
+use crate::fonts::{clock_family, date_family};
 use crate::i18n;
 use crate::settings::{ClockStyle, LayoutMode, SecondsMode, Settings};
 use crate::vfont::VectorFont;
@@ -138,13 +138,14 @@ fn layout(p: &Painter, text: &str, size: f32) -> Arc<Galley> {
     })
 }
 
-fn layout_spaced(p: &Painter, text: &str, size: f32, spacing: f32) -> Arc<Galley> {
+/// Datumstext in der Datumsschrift, mit Zeichenabstand.
+fn layout_date(p: &Painter, text: &str, size: f32, spacing: f32) -> Arc<Galley> {
     let mut job = LayoutJob::default();
     job.append(
         text,
         0.0,
         TextFormat {
-            font_id: FontId::new(size, clock_family()),
+            font_id: FontId::new(size, date_family()),
             color: Color32::WHITE,
             extra_letter_spacing: spacing,
             ..Default::default()
@@ -191,6 +192,7 @@ struct Extras {
     line_th: f32,
     date: Option<Arc<Galley>>,
     date_gap: f32,
+    date_level: f32,
 }
 
 impl Extras {
@@ -198,12 +200,12 @@ impl Extras {
         let line = allow_line && s.seconds == SecondsMode::Line;
         let date = s.show_date.then(|| {
             let txt = t.date_text().to_uppercase();
-            let ds = (size * DATE_K).clamp(11.0, 84.0).round();
-            let g = layout_spaced(p, &txt, ds, ds * 0.18);
+            let ds = date_size((size * DATE_K).clamp(11.0, 84.0), s);
+            let g = layout_date(p, &txt, ds, ds * 0.18);
             if g.size().x > max_w && g.size().x > 0.0 {
                 // zu breit (z. B. Hochformat) -> verkleinern
                 let ds = (ds * max_w / g.size().x).floor().max(9.0);
-                layout_spaced(p, &txt, ds, ds * 0.18)
+                layout_date(p, &txt, ds, ds * 0.18)
             } else {
                 g
             }
@@ -214,6 +216,7 @@ impl Extras {
             line_th: (size * 0.011).clamp(2.0, 6.0),
             date,
             date_gap: if line { size * 0.12 } else { size * 0.17 },
+            date_level: s.date_brightness,
         }
     }
 
@@ -235,12 +238,15 @@ impl Extras {
             u += 0.1;
         }
         if s.show_date {
-            u += 0.17 + DATE_K * 0.8;
+            u += 0.17 + DATE_K * 0.8 * s.date_scale;
         }
         u
     }
 
-    fn draw(&self, p: &Painter, pal: &Palette, t: &ClockTime, left: f32, right: f32, mut y: f32, cx: f32) {
+    /// Zeichnet Sekundenlinie und Datum; gibt das Rechteck des Gezeichneten zurück.
+    #[allow(clippy::too_many_arguments)]
+    fn draw(&self, p: &Painter, pal: &Palette, t: &ClockTime, left: f32, right: f32, mut y: f32, cx: f32) -> Rect {
+        let mut bounds = Rect::NOTHING;
         if self.line {
             y += self.line_gap;
             let th = self.line_th;
@@ -258,18 +264,23 @@ impl Extras {
                 pal.add((0.25 + pal.glow * 0.6) * falloff(k))
             });
             p.circle_filled(head, th * 1.15, pal.col(1.0));
+            bounds = bounds.union(track);
             y += th;
         }
         if let Some(g) = &self.date {
             y += self.date_gap;
-            let spacing = g.size().x - g.mesh_bounds.width();
-            let pos = pos2(
-                cx - g.size().x * 0.5 + spacing * 0.5,
-                y - g.mesh_bounds.min.y,
-            );
-            text_at(p, pos, g, pal.col(0.5));
+            // nach den sichtbaren Buchstaben zentrieren (ohne Zeichenabstand am Ende)
+            let pos = pos2(cx - g.mesh_bounds.center().x, y - g.mesh_bounds.min.y);
+            text_at(p, pos, g, pal.col(self.date_level));
+            bounds = bounds.union(g.mesh_bounds.translate(pos.to_vec2()));
         }
+        bounds
     }
+}
+
+/// Schriftgröße des Datums: Standardgröße mal Einstellung, auf ganze Punkte gerundet.
+fn date_size(base: f32, s: &Settings) -> f32 {
+    (base * s.date_scale).clamp(9.0, 200.0).round()
 }
 
 // ───────────────────────── Öffentliche Zeichenfunktion ─────────────────────────
@@ -533,15 +544,36 @@ fn draw_text_style(
         );
     }
     draw_glyph_items(p, vf, pal, &items);
+    // sichtbare Ausdehnung der Ziffern (ohne die leeren Ränder der Zeichenzellen)
+    let mut ink_all = Rect::NOTHING;
+    for it in &items {
+        if let Some(g) = vf.glyph(it.c) {
+            let ink = Rect::from_min_max(
+                it.origin + g.ink.min.to_vec2() * it.size,
+                it.origin + g.ink.max.to_vec2() * it.size,
+            );
+            if ink.is_positive() {
+                ink_all = ink_all.union(ink);
+            }
+        }
+    }
+    let mut bounds = Rect::from_min_max(pos2(left, top), pos2(right, top + time_h)).union(ink_all);
+    let (ink_l, ink_r) = if ink_all.is_positive() {
+        (ink_all.left(), ink_all.right())
+    } else {
+        (left, right)
+    };
 
     if let Some(ap) = ampm {
         let ap_size = (size * 0.15).round().max(9.0);
         let g = layout(p, ap, ap_size);
-        text_at(p, pos2(ap_pos.x, ap_pos.y - g.mesh_bounds.min.y), &g, pal.col(0.6));
+        let pos = pos2(ap_pos.x, ap_pos.y - g.mesh_bounds.min.y);
+        text_at(p, pos, &g, pal.col(0.6));
+        bounds = bounds.union(g.mesh_bounds.translate(pos.to_vec2()));
     }
 
-    extras.draw(p, pal, t, left, right, top + time_h, cx);
-    Rect::from_min_max(pos2(left, top), pos2(right, top + total_h))
+    // Linie und Datum unter den sichtbaren Ziffern zentrieren
+    bounds.union(extras.draw(p, pal, t, ink_l, ink_r, top + time_h, (ink_l + ink_r) * 0.5))
 }
 
 // ───────────────────────── Stil: 7-Segment ─────────────────────────
@@ -599,6 +631,26 @@ struct SegDigit {
     mask: u8,
     th: f32,
     level: f32,
+    /// Höhe, um die die Neigung gedreht ist (Mitte der Ziffer bzw. der Zeile)
+    skew_y: f32,
+}
+
+/// Waagrechte Ausdehnung der leuchtenden Segmente, ohne Neigung gemessen.
+/// Ein leeres oder nur rechts leuchtendes Feld (z. B. die „1“) zählt so nicht mit.
+fn lit_span(digits: &[SegDigit], slant: f32) -> Option<(f32, f32)> {
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for d in digits {
+        for (i, poly) in d.polys.iter().enumerate() {
+            if d.mask & (1 << i) != 0 {
+                for q in poly {
+                    let x = q.x - (d.skew_y - q.y) * slant;
+                    lo = lo.min(x);
+                    hi = hi.max(x);
+                }
+            }
+        }
+    }
+    (lo < hi).then_some((lo, hi))
 }
 
 /// Zwei Ziffern nebeneinander; gibt die rechte Kante zurück.
@@ -619,6 +671,7 @@ fn seg_pair(
             mask: d.map(|d| SEG_MASK[d as usize % 10]).unwrap_or(0),
             th: SEG_TH * h,
             level,
+            skew_y: y + h * 0.5,
         });
         x += dw + if i == 0 { SEG_DS * h } else { 0.0 };
     }
@@ -727,6 +780,9 @@ fn draw_segment_style(p: &Painter, rect: Rect, t: &ClockTime, s: &Settings, pal:
             slant,
             0.6,
         );
+        for d in digits.iter_mut().rev().take(2) {
+            d.skew_y = last_row_y + h * 0.5;
+        }
     }
 
     if pal.glow > 0.01 {
@@ -792,14 +848,25 @@ fn draw_segment_style(p: &Painter, rect: Rect, t: &ClockTime, s: &Settings, pal:
         s.ghost_segments,
     );
 
+    let mut bounds = Rect::from_min_max(pos2(left, top), pos2(right, top + time_h));
+    for d in &digits {
+        for poly in &d.polys {
+            for q in poly {
+                bounds.extend_with(*q);
+            }
+        }
+    }
     if let Some(ap) = ampm {
         let size = (h * 0.15).round().max(9.0);
         let g = layout(p, ap, size);
-        text_at(p, pos2(ap_x, top - g.mesh_bounds.min.y), &g, pal.col(0.6));
+        let pos = pos2(ap_x, top - g.mesh_bounds.min.y);
+        text_at(p, pos, &g, pal.col(0.6));
+        bounds = bounds.union(g.mesh_bounds.translate(pos.to_vec2()));
     }
 
-    extras.draw(p, pal, t, left, right, top + time_h, cx);
-    Rect::from_min_max(pos2(left, top), pos2(right, top + total_h))
+    // Linie und Datum unter den leuchtenden Ziffern zentrieren
+    let (ink_l, ink_r) = lit_span(&digits, slant).unwrap_or((left, right));
+    bounds.union(extras.draw(p, pal, t, ink_l, ink_r, top + time_h, (ink_l + ink_r) * 0.5))
 }
 
 // ───────────────────────── Stil: Analog ─────────────────────────
@@ -857,20 +924,22 @@ fn draw_analog_style(p: &Painter, rect: Rect, t: &ClockTime, s: &Settings, pal: 
 
     // Datum im unteren Teil des Zifferblatts
     if s.show_date {
-        let size = (r * 0.07).clamp(10.0, 60.0).round();
+        let size = date_size((r * 0.07).clamp(10.0, 60.0), s);
         let txt = t.short_date_text().to_uppercase();
-        let g = layout_spaced(p, &txt, size, size * 0.16);
-        let spacing = g.size().x - g.mesh_bounds.width();
-        let pos = pos2(
-            c.x - g.size().x * 0.5 + spacing * 0.5,
-            c.y + r * 0.42 - g.mesh_bounds.center().y,
-        );
-        text_at(p, pos, &g, pal.col(0.5));
+        let mut g = layout_date(p, &txt, size, size * 0.16);
+        let max_w = r * 1.3;
+        if g.size().x > max_w {
+            // passt nicht ins Zifferblatt -> verkleinern
+            let size = (size * max_w / g.size().x).floor().max(8.0);
+            g = layout_date(p, &txt, size, size * 0.16);
+        }
+        let pos = pos2(c.x - g.mesh_bounds.center().x, c.y + r * 0.42 - g.mesh_bounds.center().y);
+        text_at(p, pos, &g, pal.col(s.date_brightness));
     }
     if !s.use_24h {
         let size = (r * 0.06).clamp(9.0, 50.0).round();
         let g = layout(p, if t.h < 12 { "AM" } else { "PM" }, size);
-        let pos = pos2(c.x - g.size().x * 0.5, c.y - r * 0.4 - g.mesh_bounds.center().y);
+        let pos = pos2(c.x - g.mesh_bounds.center().x, c.y - r * 0.4 - g.mesh_bounds.center().y);
         text_at(p, pos, &g, pal.col(0.45));
     }
 

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 pub const CLOCK_FAMILY: &str = "clock";
 pub const UI_BOLD_FAMILY: &str = "ui-bold";
+pub const DATE_FAMILY: &str = "date";
 
 #[derive(Clone, Debug)]
 pub struct FontEntry {
@@ -40,6 +41,11 @@ pub const RECOMMENDED: &[&str] = &[
 
 pub fn clock_family() -> FontFamily {
     FontFamily::Name(CLOCK_FAMILY.into())
+}
+
+/// Schrift für das Datum (fällt auf die Uhrschrift zurück).
+pub fn date_family() -> FontFamily {
+    FontFamily::Name(DATE_FAMILY.into())
 }
 
 pub fn ui_bold_family() -> FontFamily {
@@ -168,8 +174,12 @@ pub fn spawn_font_scan() -> SharedFontList {
 }
 
 /// Baut die egui-Schriftdefinitionen: Segoe UI für die Oberfläche,
-/// die gewählte Schrift für die Uhr – jeweils mit egui-Standardschriften als Fallback.
-pub fn build_font_definitions(clock_font: Option<(&Path, u32)>) -> FontDefinitions {
+/// die gewählte Schrift für die Uhr und optional eine eigene für das Datum –
+/// jeweils mit egui-Standardschriften als Fallback.
+pub fn build_font_definitions(
+    clock_font: Option<(&Path, u32)>,
+    date_font: Option<(&Path, u32)>,
+) -> FontDefinitions {
     let mut defs = FontDefinitions::default();
     let dir = windows_fonts_dir();
     let default_prop = defs
@@ -210,6 +220,19 @@ pub fn build_font_definitions(clock_font: Option<(&Path, u32)>) -> FontDefinitio
         }
     }
     clock.extend(prop.iter().cloned());
+
+    // Datum: eigene Schrift, sonst wie die Uhr
+    let mut date = Vec::new();
+    if let Some((path, index)) = date_font {
+        if let Ok(bytes) = std::fs::read(path) {
+            let mut fd = FontData::from_owned(bytes);
+            fd.index = index;
+            defs.font_data.insert("date".into(), Arc::new(fd));
+            date.push("date".to_string());
+        }
+    }
+    date.extend(clock.iter().cloned());
+    defs.families.insert(date_family(), date);
     defs.families.insert(clock_family(), clock);
 
     defs

@@ -36,12 +36,15 @@ Geschrieben in Rust mit [egui](https://github.com/emilk/egui).
 - **Drei Stile:** Schrift (jede installierte Schriftart), 7-Segment (LED-Wecker) und Analog
 - **Vektor-Ziffern:** gestochen scharf in jeder Größe, auch auf 4K
 - **Einzeilig oder zweizeilig:** Stunden und Minuten nebeneinander oder übereinander, ideal für Hochformat-Monitore
+- **Position frei wählbar:** Die Uhr lässt sich per Schieberegler waagrecht und senkrecht verschieben,
+  z. B. ins obere Viertel eines Hochformat-Monitors
+- **Datum nach Wunsch:** eigene Schriftart, Größe und Helligkeit
 - **Helligkeit, Farbe, Leuchten, Größe, Hintergrund** und Schriftstärke bei variablen Schriften
 - **Stimmungs-Hintergründe zum Einschlafen:** Sternenhimmel mit Sternschnuppen, Polarlicht,
   Glühwürmchen, Lavalampe, Plasma und ein Atem-Licht zum Mitatmen, mit Helligkeit, Tempo,
   Einfärben in der Uhrfarbe und automatischem Ausblenden
 - **Nachtmodus:** dimmt in einem Zeitfenster automatisch
-- **Wecker:** mehrere Weckzeiten mit Wochentagen, drei eingebaute Töne oder eigene Audiodatei,
+- **Wecker:** mehrere Weckzeiten mit Namen und Wochentagen, drei eingebaute Töne oder eigene Audiodatei,
   sanft lauter werden, Schlummern, automatisches Ausschalten
 - **Lichtwecker:** Vor dem Wecken wird der Bildschirm langsam warm und hell
 - **Vollbild auf dem gewünschten Bildschirm**, Bildschirm wach halten, Einbrennschutz,
@@ -114,12 +117,15 @@ Written in Rust with [egui](https://github.com/emilk/egui).
 - **Three styles:** text (any installed font), 7-segment (LED alarm clock) and analog
 - **Vector digits:** razor-sharp at any size, including 4K
 - **Single or two lines:** hours and minutes side by side or stacked, ideal for portrait monitors
+- **Free positioning:** sliders move the clock horizontally and vertically,
+  e.g. into the top quarter of a portrait monitor
+- **Date your way:** its own font, size and brightness
 - **Brightness, color, glow, size, background**, and font weight for variable fonts
 - **Ambient backgrounds for falling asleep:** starry sky with shooting stars, aurora,
   fireflies, lava lamp, plasma and a breathing light to breathe along with, with brightness,
   speed, clock-color tint and automatic fade-out
 - **Night mode:** dims automatically during a time window
-- **Alarms:** several alarm times with weekdays, three built-in sounds or your own audio file,
+- **Alarms:** several named alarm times with weekdays, three built-in sounds or your own audio file,
   gentle fade-in, snooze, automatic shut-off
 - **Wake-up light:** before the alarm, the screen slowly turns warm and bright
 - **Fullscreen on the display of your choice**, keep screen awake, burn-in protection,

@@ -92,10 +92,14 @@ impl AlarmSound {
     }
 }
 
+pub const ALARM_NAME_MAX: usize = 40;
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
 pub struct Alarm {
     pub enabled: bool,
+    /// Frei wählbarer Name, z. B. "Arbeit" (leer = kein Name)
+    pub name: String,
     pub hour: u32,
     pub minute: u32,
     /// Montag … Sonntag. Kein Tag gewählt = einmaliger Wecker.
@@ -106,6 +110,7 @@ impl Default for Alarm {
     fn default() -> Self {
         Self {
             enabled: true,
+            name: String::new(),
             hour: 7,
             minute: 0,
             days: [true, true, true, true, true, false, false],
@@ -130,6 +135,9 @@ pub struct Settings {
     pub brightness: f32,
     pub glow: f32,
     pub scale: f32,
+    /// Position der Uhr: -1 = ganz links bzw. oben, 0 = Mitte, 1 = ganz rechts bzw. unten
+    pub clock_x: f32,
+    pub clock_y: f32,
 
     // ── Stimmung (bewegter Hintergrund) ─────────
     pub ambient: AmbientMode,
@@ -145,6 +153,14 @@ pub struct Settings {
     pub leading_zero: bool,
     pub seconds: SecondsMode,
     pub show_date: bool,
+    /// Eigene Schrift für das Datum (leerer Pfad = wie die Uhrzeit)
+    pub date_font_name: String,
+    pub date_font_path: String,
+    pub date_font_index: u32,
+    /// Größe des Datums relativ zur Standardgröße
+    pub date_scale: f32,
+    /// Helligkeit des Datums relativ zur Uhrzeit
+    pub date_brightness: f32,
     pub show_next_alarm: bool,
     pub blink_colon: bool,
     pub ghost_segments: bool,
@@ -202,6 +218,8 @@ impl Default for Settings {
             brightness: 0.6,
             glow: 0.55,
             scale: 0.85,
+            clock_x: 0.0,
+            clock_y: 0.0,
 
             ambient: AmbientMode::Off,
             ambient_intensity: 0.6,
@@ -214,6 +232,11 @@ impl Default for Settings {
             leading_zero: true,
             seconds: SecondsMode::Off,
             show_date: true,
+            date_font_name: String::new(),
+            date_font_path: String::new(),
+            date_font_index: 0,
+            date_scale: 1.0,
+            date_brightness: 0.5,
             show_next_alarm: true,
             blink_colon: true,
             ghost_segments: true,
@@ -290,6 +313,10 @@ impl Settings {
         self.night_brightness = self.night_brightness.clamp(0.02, 1.0);
         self.glow = self.glow.clamp(0.0, 1.0);
         self.scale = self.scale.clamp(0.3, 1.0);
+        self.clock_x = self.clock_x.clamp(-1.0, 1.0);
+        self.clock_y = self.clock_y.clamp(-1.0, 1.0);
+        self.date_scale = self.date_scale.clamp(0.5, 2.5);
+        self.date_brightness = self.date_brightness.clamp(0.05, 1.0);
         self.ambient_intensity = self.ambient_intensity.clamp(0.05, 1.0);
         self.ambient_speed = self.ambient_speed.clamp(0.2, 2.5);
         self.ambient_timeout = self.ambient_timeout.min(240);
@@ -303,6 +330,9 @@ impl Settings {
         for a in &mut self.alarms {
             a.hour %= 24;
             a.minute %= 60;
+            if a.name.chars().count() > ALARM_NAME_MAX {
+                a.name = a.name.chars().take(ALARM_NAME_MAX).collect();
+            }
         }
     }
 }

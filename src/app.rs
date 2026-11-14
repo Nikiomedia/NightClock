@@ -11,6 +11,7 @@ use crate::i18n::t;
 use crate::ui;
 use crate::vfont::VectorFont;
 use chrono::{DateTime, Local, Timelike};
+use egui::layers::ShapeIdx;
 use egui::{pos2, vec2, Color32, CursorIcon, Key, Mesh, Rect, Sense, Shape, ViewportCommand};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -18,6 +19,8 @@ use std::time::{Duration, Instant};
 pub struct Ringing {
     pub hour: u32,
     pub minute: u32,
+    /// Name des Weckers (leer = ohne Namen)
+    pub name: String,
     pub started: Instant,
     pub player: Option<AlarmPlayer>,
 }
@@ -34,6 +37,7 @@ pub struct NightClockApp {
     saved: Settings,
     last_save_check: Instant,
     loaded_font: Option<(String, u32)>,
+    loaded_date_font: Option<(String, u32)>,
     loaded_vfont: (String, u32, u32),
     pub vfont: VectorFont,
     pub ambient: crate::ambient::Ambient,
@@ -56,6 +60,8 @@ pub struct NightClockApp {
     last_tick: DateTime<Local>,
     pub ringing: Option<Ringing>,
     pub snooze_until: Option<DateTime<Local>>,
+    /// Name des Weckers, der gerade schlummert
+    snooze_name: String,
     pub preview: Option<AlarmPlayer>,
     awake_state: Option<(bool, bool)>,
     applied_on_top: Option<bool>,
@@ -66,6 +72,7 @@ pub struct NightClockApp {
     /// Nur für automatische Testbilder (Debug-Build)
     no_save: bool,
     dev_sunrise: Option<f32>,
+    dev_time: Option<(u32, u32)>,
     pub dev_scroll: Option<f32>,
     #[cfg(debug_assertions)]
     devshot: Option<crate::devshot::DevShot>,
@@ -93,16 +100,20 @@ impl NightClockApp {
                 s.font_index = 0;
             }
         }
-        let path = PathBuf::from(&s.font_path);
-        cc.egui_ctx.set_fonts(fonts::build_font_definitions(
-            (!s.font_path.is_empty()).then_some((path.as_path(), s.font_index)),
-        ));
+        if !s.date_font_path.is_empty() && !PathBuf::from(&s.date_font_path).exists() {
+            // Datumsschrift fehlt -> wie die Uhrzeit
+            s.date_font_name.clear();
+            s.date_font_path.clear();
+            s.date_font_index = 0;
+        }
+        cc.egui_ctx.set_fonts(Self::font_definitions(&s));
         ui::apply_style(&cc.egui_ctx, s.color);
 
         let weight = (s.font_weight > 0.0).then_some(s.font_weight);
         let vfont = VectorFont::load(&s.font_path, s.font_index, weight);
         Self {
             loaded_font: Some((s.font_path.clone(), s.font_index)),
+            loaded_date_font: Some((s.date_font_path.clone(), s.date_font_index)),
             loaded_vfont: (s.font_path.clone(), s.font_index, s.font_weight.to_bits()),
             vfont,
             ambient: crate::ambient::Ambient::new(),
@@ -127,6 +138,7 @@ impl NightClockApp {
             last_tick: Local::now(),
             ringing: None,
             snooze_until: None,
+            snooze_name: String::new(),
             preview: None,
             awake_state: None,
             applied_on_top: None,
@@ -136,6 +148,7 @@ impl NightClockApp {
             is_fullscreen: false,
             no_save: false,
             dev_sunrise: None,
+            dev_time: None,
             dev_scroll: None,
             #[cfg(debug_assertions)]
             devshot: crate::devshot::DevShot::from_env(),
@@ -327,11 +340,12 @@ impl NightClockApp {
                     self.s.alarms[i].enabled = false;
                 }
                 self.snooze_until = None;
-                self.start_ringing(a.hour, a.minute);
+                self.start_ringing(a.hour, a.minute, a.name.trim().to_string());
             } else if let Some(su) = self.snooze_until {
                 if now >= su {
                     self.snooze_until = None;
-                    self.start_ringing(su.hour(), su.minute());
+                    let name = std::mem::take(&mut self.snooze_name);
+                    self.start_ringing(su.hour(), su.minute(), name);
                 }
             }
         }
@@ -360,7 +374,7 @@ impl NightClockApp {
         }
     }
 
-    fn start_ringing(&mut self, hour: u32, minute: u32) {
+    fn start_ringing(&mut self, hour: u32, minute: u32, name: String) {
         self.preview = None;
         let player = match AlarmPlayer::start(
             self.s.sound,
@@ -377,6 +391,7 @@ impl NightClockApp {
         self.ringing = Some(Ringing {
             hour,
             minute,
+            name,
             started: Instant::now(),
             player,
         });
@@ -385,7 +400,8 @@ impl NightClockApp {
     }
 
     pub fn snooze(&mut self) {
-        if self.ringing.take().is_some() {
+        if let Some(r) = self.ringing.take() {
+            self.snooze_name = r.name;
             let until = Local::now() + chrono::Duration::minutes(self.s.snooze_minutes as i64);
             self.snooze_until = Some(until);
             self.show_toast(format!(
@@ -400,6 +416,7 @@ impl NightClockApp {
     pub fn dismiss(&mut self) {
         self.ringing = None;
         self.snooze_until = None;
+        self.snooze_name.clear();
         self.show_toast(t("Wecker aus  ·  Guten Morgen!", "Alarm off  ·  Good morning!"));
     }
 
@@ -560,16 +577,27 @@ impl NightClockApp {
 
     // ───────────────────────── Systemzustand ─────────────────────────
 
+    fn font_definitions(s: &Settings) -> egui::FontDefinitions {
+        let clock = PathBuf::from(&s.font_path);
+        let date = PathBuf::from(&s.date_font_path);
+        fonts::build_font_definitions(
+            (!s.font_path.is_empty()).then_some((clock.as_path(), s.font_index)),
+            (!s.date_font_path.is_empty()).then_some((date.as_path(), s.date_font_index)),
+        )
+    }
+
     fn apply_font_if_changed(&mut self, ctx: &egui::Context) {
         let key = (self.s.font_path.clone(), self.s.font_index);
-        if self.loaded_font.as_ref() != Some(&key) {
-            let path = PathBuf::from(&key.0);
-            ctx.set_fonts(fonts::build_font_definitions(
-                (!key.0.is_empty()).then_some((path.as_path(), key.1)),
-            ));
+        let date_key = (self.s.date_font_path.clone(), self.s.date_font_index);
+        let clock_changed = self.loaded_font.as_ref() != Some(&key);
+        if clock_changed || self.loaded_date_font.as_ref() != Some(&date_key) {
+            ctx.set_fonts(Self::font_definitions(&self.s));
             self.loaded_font = Some(key);
-            // neue Schrift -> Standardstärke
-            self.s.font_weight = 0.0;
+            self.loaded_date_font = Some(date_key);
+            if clock_changed {
+                // neue Schrift -> Standardstärke
+                self.s.font_weight = 0.0;
+            }
         }
         let vkey = (self.s.font_path.clone(), self.s.font_index, self.s.font_weight.to_bits());
         if self.loaded_vfont != vkey {
@@ -641,20 +669,30 @@ impl NightClockApp {
                     "line" => self.s.seconds = SecondsMode::Line,
                     "digits" => self.s.seconds = SecondsMode::Digits,
                     "nocolon" => self.s.blink_colon = false,
+                    "nozero" => self.s.leading_zero = false,
                     "hover" => self.last_activity = Instant::now(),
                     "alarm" => {
-                        self.s.alarms = vec![crate::settings::Alarm::default()];
+                        self.s.alarms = vec![crate::settings::Alarm {
+                            name: v.into(),
+                            ..Default::default()
+                        }];
                     }
                     "ringing" => {
                         self.ringing = Some(Ringing {
                             hour: 7,
                             minute: 0,
+                            name: v.into(),
                             started: Instant::now(),
                             player: None,
                         })
                     }
                     "toast" => self.show_toast("Bildschirm 2  ·  Esc oder F11 beendet das Vollbild"),
                     "sunrise" => self.dev_sunrise = v.parse().ok(),
+                    "time" => {
+                        self.dev_time = v
+                            .split_once(':')
+                            .and_then(|(h, m)| Some((h.parse().ok()?, m.parse().ok()?)));
+                    }
                     "scroll" => self.dev_scroll = v.parse().ok(),
                     "bright" => self.s.brightness = v.parse().unwrap_or(1.0),
                     "glow" => self.s.glow = v.parse().unwrap_or(0.5),
@@ -664,6 +702,21 @@ impl NightClockApp {
                             self.s.color = [c[0], c[1], c[2]];
                         }
                     }
+                    "pos" => {
+                        if let Some((x, y)) = v.split_once('/') {
+                            self.s.clock_x = x.parse().unwrap_or(0.0);
+                            self.s.clock_y = y.parse().unwrap_or(0.0);
+                        }
+                    }
+                    "noburn" => self.s.burn_in_shift = false,
+                    "scale" => self.s.scale = v.parse().unwrap_or(0.85),
+                    "datefont" => {
+                        self.s.date_font_path = format!("C:\\Windows\\Fonts\\{v}");
+                        self.s.date_font_name = v.into();
+                        self.s.date_font_index = 0;
+                    }
+                    "datesize" => self.s.date_scale = v.parse().unwrap_or(1.0),
+                    "datebright" => self.s.date_brightness = v.parse().unwrap_or(0.5),
                     "font" => {
                         self.s.font_path = format!("C:\\Windows\\Fonts\\{v}");
                         self.s.font_name = v.into();
@@ -773,13 +826,17 @@ impl NightClockApp {
         }
         let text = if let Some(su) = self.snooze_until {
             format!("{} {:02}:{:02}", t("Schlummern bis", "Snoozing until"), su.hour(), su.minute())
-        } else if let Some((t, _)) = alarm::next_alarm(&self.s.alarms, now) {
-            format!(
+        } else if let Some((at, i)) = alarm::next_alarm(&self.s.alarms, now) {
+            let base = format!(
                 "{}  {:02}:{:02}",
-                alarm::relative_day(t, now),
-                t.hour(),
-                t.minute()
-            )
+                alarm::relative_day(at, now),
+                at.hour(),
+                at.minute()
+            );
+            match self.s.alarms[i].name.trim() {
+                "" => base,
+                name => format!("{base}  ·  {name}"),
+            }
         } else {
             return;
         };
@@ -850,23 +907,77 @@ impl NightClockApp {
             // Platz für die Wecker-Karte unten freihalten
             status_h = status_h.max(230.0 + rect.height() * 0.07);
         }
-        let clock_rect = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - status_h))
-            .translate(shift);
+        let area = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - status_h));
+        let clock_rect = area.translate(shift);
 
-        // Pulsierender Schein, während der Wecker klingelt
-        if let Some(r) = &self.ringing {
-            let t = r.started.elapsed().as_secs_f32();
-            let pulse = 0.5 + 0.5 * (t * std::f32::consts::TAU / 1.8).sin();
-            let c = clock_rect.center();
-            let rad = clock_rect.size().min_elem() * 0.75;
-            clock::radial_glow(painter, c, vec2(rad * 1.6, rad), |k| {
-                pal.add((0.10 + 0.22 * pulse) * falloff(k))
+        // Platzhalter für den pulsierenden Schein beim Klingeln (liegt hinter der Uhr,
+        // wird aber erst gesetzt, wenn die endgültige Position der Uhr feststeht)
+        let glow_slot = self.ringing.as_ref().map(|_| painter.add(Shape::Noop));
+
+        let layer = painter.layer_id();
+        let first = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+        let mut t = ClockTime::from(now);
+        if let Some((h, m)) = self.dev_time {
+            (t.h, t.m) = (h, m);
+        }
+        let bounds = clock::draw_clock(painter, clock_rect, &t, &self.s, &pal, &mut self.vfont);
+        let last = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+
+        // Uhr an die gewählte Position schieben (innerhalb des freien Platzes)
+        let delta = self.position_offset(area, bounds.translate(-shift), ctx.pixels_per_point());
+        if delta != egui::Vec2::ZERO {
+            ctx.graphics_mut(|g| {
+                let list = g.entry(layer);
+                for i in first.0..last.0 {
+                    list.mutate_shape(ShapeIdx(i), |cs| cs.shape.translate(delta));
+                }
             });
         }
+        let bounds = bounds.translate(delta);
 
-        let t = ClockTime::from(now);
-        clock::draw_clock(painter, clock_rect, &t, &self.s, &pal, &mut self.vfont);
+        // Pulsierender Schein, während der Wecker klingelt: wird am Ende gezeichnet
+        // und dann in den Platzhalter hinter der Uhr verschoben
+        if let (Some(r), Some(slot)) = (&self.ringing, glow_slot) {
+            let t = r.started.elapsed().as_secs_f32();
+            let pulse = 0.5 + 0.5 * (t * std::f32::consts::TAU / 1.8).sin();
+            let rad = clock_rect.size().min_elem() * 0.75;
+            let at = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+            clock::radial_glow(painter, bounds.center(), vec2(rad * 1.6, rad), |k| {
+                pal.add((0.10 + 0.22 * pulse) * falloff(k))
+            });
+            ctx.graphics_mut(|g| {
+                let list = g.entry(layer);
+                let mut glow = Shape::Noop;
+                list.mutate_shape(at, |cs| glow = std::mem::replace(&mut cs.shape, Shape::Noop));
+                list.mutate_shape(slot, |cs| cs.shape = glow);
+            });
+        }
         self.draw_status_line(painter, rect, shift, &pal, now);
+    }
+
+    /// Verschiebung der Uhr nach `clock_x` / `clock_y`, so dass sie im freien Platz bleibt.
+    /// `bounds` = Rechteck der Uhr ohne Einbrennschutz-Versatz.
+    fn position_offset(&self, area: Rect, bounds: Rect, ppp: f32) -> egui::Vec2 {
+        let (px, py) = (self.s.clock_x, self.s.clock_y);
+        if (px == 0.0 && py == 0.0) || !bounds.is_positive() {
+            return egui::Vec2::ZERO;
+        }
+        // Rand: etwas Abstand, plus Spielraum für den Einbrennschutz
+        let mut margin = area.size().min_elem() * 0.03;
+        if self.s.burn_in_shift {
+            margin += area.size().min_elem() * 0.025;
+        }
+        let room = |lo: f32, hi: f32, b_lo: f32, b_hi: f32, k: f32| -> f32 {
+            if k < 0.0 {
+                k * (b_lo - (lo + margin)).max(0.0)
+            } else {
+                k * ((hi - margin) - b_hi).max(0.0)
+            }
+        };
+        let dx = room(area.left(), area.right(), bounds.left(), bounds.right(), px);
+        let dy = room(area.top(), area.bottom(), bounds.top(), bounds.bottom(), py);
+        // auf ganze Bildpunkte runden, damit Text scharf bleibt
+        vec2((dx * ppp).round() / ppp, (dy * ppp).round() / ppp)
     }
 
     /// 1 = sichtbar; blendet nach der eingestellten Zeit ohne Bedienung aus.

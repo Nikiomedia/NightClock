@@ -4,7 +4,7 @@ use crate::app::NightClockApp;
 use crate::fonts::ui_bold_family;
 use crate::i18n::t;
 use crate::ambient::AmbientParams;
-use crate::settings::{Alarm, AlarmSound, AmbientMode, ClockStyle, Language, LayoutMode, SecondsMode};
+use crate::settings::{Alarm, AlarmSound, ALARM_NAME_MAX, AmbientMode, ClockStyle, Language, LayoutMode, SecondsMode};
 use egui::{
     pos2, vec2, Align, Align2, Area, Button, Color32, ComboBox, Context, CornerRadius, DragValue,
     FontFamily, FontId, Frame, Id, Layout, Margin, Order, Painter, PopupCloseBehavior, Pos2, Rect,
@@ -449,6 +449,11 @@ pub fn ringing_overlay(app: &mut NightClockApp, ctx: &Context) {
         return;
     };
     let (h, m) = (r.hour, r.minute);
+    let title = if r.name.is_empty() {
+        t("Wecker", "Alarm").to_string()
+    } else {
+        r.name.clone()
+    };
     let secs = r.started.elapsed().as_secs_f32();
     let acc = accent(app.s.color);
     let on = on_accent(app.s.color);
@@ -478,7 +483,7 @@ pub fn ringing_overlay(app: &mut NightClockApp, ctx: &Context) {
                     ui.set_width(w);
                     ui.with_layout(Layout::top_down(Align::Center), |ui| {
                         let (rect, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-                        let text = format!("{}  ·  {h:02}:{m:02}", t("Wecker", "Alarm"));
+                        let text = format!("{title}  ·  {h:02}:{m:02}");
                         let g = ui.painter().layout_no_wrap(
                             text,
                             FontId::new(20.0, ui_bold_family()),
@@ -658,7 +663,7 @@ fn section_look(app: &mut NightClockApp, ui: &mut Ui, acc: Color32) {
             );
         }
         ui.add_space(4.0);
-        weak(ui, t("Schriftart (Ziffern und Datum)", "Font (digits and date)"));
+        weak(ui, t("Schriftart", "Font"));
         font_combo(app, ui);
         if let Some((min, def, max)) = app.vfont.weight_axis() {
             if max > min {
@@ -688,6 +693,7 @@ fn section_look(app: &mut NightClockApp, ui: &mut Ui, acc: Color32) {
         slider_row(ui, t("Helligkeit", "Brightness"), &mut app.s.brightness, 0.02..=1.0, pct);
         slider_row(ui, t("Leuchten", "Glow"), &mut app.s.glow, 0.0..=1.0, pct);
         slider_row(ui, t("Größe", "Size"), &mut app.s.scale, 0.3..=1.0, pct);
+        position_rows(app, ui);
         ui.horizontal(|ui| {
             ui.label(t("Hintergrund", "Background"));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -817,15 +823,23 @@ fn color_row(ui: &mut Ui, color: &mut [u8; 3]) {
     });
 }
 
-fn font_combo(app: &mut NightClockApp, ui: &mut Ui) {
+/// Ergebnis einer Schriftauswahl: `Some(None)` = "wie die Uhrzeit".
+type FontChoice = Option<Option<(String, String, u32)>>;
+
+/// Auswahlliste der Systemschriften. Mit `same_label` gibt es oben einen Eintrag
+/// "wie die Uhrzeit" (für das Datum).
+fn font_picker(app: &mut NightClockApp, ui: &mut Ui, id: &str, current: &str, same_label: Option<&str>) -> FontChoice {
     let list = app.font_list.lock().ok().and_then(|g| g.clone());
-    let mut chosen: Option<(String, String, u32)> = None;
-    let current = app.s.font_name.clone();
-    ComboBox::from_id_salt("font_combo")
+    let mut chosen: FontChoice = None;
+    let shown = match same_label {
+        Some(l) if current.is_empty() => l.to_string(),
+        _ => current.to_string(),
+    };
+    ComboBox::from_id_salt(id)
         .width(ui.available_width())
         .height(420.0)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
-        .selected_text(&current)
+        .selected_text(shown)
         .show_ui(ui, |ui| {
             ui.add(
                 TextEdit::singleline(&mut app.font_search)
@@ -833,6 +847,11 @@ fn font_combo(app: &mut NightClockApp, ui: &mut Ui) {
                     .desired_width(f32::INFINITY),
             );
             ui.add_space(4.0);
+            if let Some(l) = same_label {
+                if app.font_search.is_empty() && ui.selectable_label(current.is_empty(), l).clicked() {
+                    chosen = Some(None);
+                }
+            }
             match &list {
                 None => {
                     ui.label(t("Schriften werden geladen …", "Loading fonts …"));
@@ -841,7 +860,7 @@ fn font_combo(app: &mut NightClockApp, ui: &mut Ui) {
                     let q = app.font_search.to_lowercase();
                     let mut item = |ui: &mut Ui, f: &crate::fonts::FontEntry| {
                         if ui.selectable_label(current == f.name, &f.name).clicked() {
-                            chosen = Some((f.name.clone(), f.path.to_string_lossy().into_owned(), f.index));
+                            chosen = Some(Some((f.name.clone(), f.path.to_string_lossy().into_owned(), f.index)));
                         }
                     };
                     if q.is_empty() {
@@ -858,12 +877,90 @@ fn font_combo(app: &mut NightClockApp, ui: &mut Ui) {
                 }
             }
         });
-    if let Some((name, path, index)) = chosen {
+    if chosen.is_some() {
+        ui.close_menu();
+    }
+    chosen
+}
+
+fn font_combo(app: &mut NightClockApp, ui: &mut Ui) {
+    let current = app.s.font_name.clone();
+    if let Some(Some((name, path, index))) = font_picker(app, ui, "font_combo", &current, None) {
         app.s.font_name = name;
         app.s.font_path = path;
         app.s.font_index = index;
-        ui.close_menu();
     }
+}
+
+fn date_font_combo(app: &mut NightClockApp, ui: &mut Ui) {
+    let current = if app.s.date_font_path.is_empty() {
+        String::new()
+    } else {
+        app.s.date_font_name.clone()
+    };
+    let same = t("Wie die Uhrzeit", "Same as the time");
+    match font_picker(app, ui, "date_font_combo", &current, Some(same)) {
+        Some(Some((name, path, index))) => {
+            app.s.date_font_name = name;
+            app.s.date_font_path = path;
+            app.s.date_font_index = index;
+        }
+        Some(None) => {
+            app.s.date_font_name.clear();
+            app.s.date_font_path.clear();
+            app.s.date_font_index = 0;
+        }
+        None => {}
+    }
+}
+
+/// Schieberegler für die Position der Uhr.
+fn position_rows(app: &mut NightClockApp, ui: &mut Ui) {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        weak(ui, t("Position", "Position"));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let centered = app.s.clock_x == 0.0 && app.s.clock_y == 0.0;
+            if ui
+                .add_enabled(!centered, Button::new(t("Mittig", "Center")).small())
+                .clicked()
+            {
+                app.s.clock_x = 0.0;
+                app.s.clock_y = 0.0;
+            }
+        });
+    });
+    let side = |v: f32, neg: &str, pos: &str| -> String {
+        if v.abs() < 0.005 {
+            t("Mitte", "center").into()
+        } else {
+            format!("{} {:.0} %", if v < 0.0 { neg } else { pos }, v.abs() * 100.0)
+        }
+    };
+    // in der Nähe der Mitte einrasten
+    let snap = |v: &mut f32| {
+        if v.abs() < 0.04 {
+            *v = 0.0;
+        }
+    };
+    if slider_row(ui, t("Waagrecht", "Horizontal"), &mut app.s.clock_x, -1.0..=1.0, |v| {
+        side(v, t("links", "left"), t("rechts", "right"))
+    })
+    .changed()
+    {
+        snap(&mut app.s.clock_x);
+    }
+    if slider_row(ui, t("Senkrecht", "Vertical"), &mut app.s.clock_y, -1.0..=1.0, |v| {
+        side(v, t("oben", "top"), t("unten", "bottom"))
+    })
+    .changed()
+    {
+        snap(&mut app.s.clock_y);
+    }
+    weak(ui, t(
+        "Je kleiner die Uhr, desto weiter lässt sie sich verschieben.",
+        "The smaller the clock, the further it can be moved.",
+    ));
 }
 
 fn section_display(app: &mut NightClockApp, ui: &mut Ui, acc: Color32) {
@@ -886,6 +983,22 @@ fn section_display(app: &mut NightClockApp, ui: &mut Ui, acc: Color32) {
             toggle_row(ui, t("Doppelpunkt pulsiert", "Pulsing colon"), &mut app.s.blink_colon, acc);
         }
         toggle_row(ui, t("Datum anzeigen", "Show date"), &mut app.s.show_date, acc);
+        if app.s.show_date {
+            Frame::new()
+                .fill(Color32::from_rgb(30, 32, 39))
+                .corner_radius(10)
+                .inner_margin(Margin::symmetric(10, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    weak(ui, t("Schriftart des Datums", "Date font"));
+                    date_font_combo(app, ui);
+                    ui.add_space(2.0);
+                    slider_row(ui, t("Größe", "Size"), &mut app.s.date_scale, 0.5..=2.5, pct);
+                    slider_row(ui, t("Helligkeit", "Brightness"), &mut app.s.date_brightness, 0.05..=1.0, pct)
+                        .on_hover_text(t("Im Verhältnis zur Uhrzeit", "Relative to the time"));
+                });
+            ui.add_space(2.0);
+        }
         toggle_row(ui, t("Nächsten Wecker anzeigen", "Show next alarm"), &mut app.s.show_next_alarm, acc);
         if app.s.style == ClockStyle::Segment {
             toggle_row(ui, t("Inaktive Segmente zeigen", "Show inactive segments"), &mut app.s.ghost_segments, acc);
@@ -953,7 +1066,14 @@ fn section_alarm(app: &mut NightClockApp, ui: &mut Ui, acc: Color32) {
                             ui.label(RichText::new(day_hint(a)).size(12.5).color(Color32::from_gray(130)));
                         });
                     });
-                    ui.add_space(2.0);
+                    ui.add_space(4.0);
+                    ui.add(
+                        TextEdit::singleline(&mut a.name)
+                            .hint_text(t("Name (optional), z. B. Arbeit", "Name (optional), e.g. Work"))
+                            .char_limit(ALARM_NAME_MAX)
+                            .desired_width(f32::INFINITY),
+                    );
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         ui.spacing_mut().button_padding = vec2(2.0, 2.0);
